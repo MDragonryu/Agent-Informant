@@ -14,11 +14,14 @@ const (
 )
 
 type WatchEvent struct {
-	Type          WatchEventType `json:"type"`
-	ObservedAt    time.Time      `json:"observed_at"`
-	PreviousState *State         `json:"previous_state,omitempty"`
-	Advice        *Advice        `json:"advice,omitempty"`
-	Error         string         `json:"error,omitempty"`
+	Type           WatchEventType `json:"type"`
+	ObservedAt     time.Time      `json:"observed_at"`
+	PreviousState  *State         `json:"previous_state,omitempty"`
+	State          State          `json:"state,omitempty"`
+	Action         string         `json:"action,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	LimitingWindow *Window        `json:"limiting_window,omitempty"`
+	Error          string         `json:"error,omitempty"`
 }
 
 type Watcher struct {
@@ -52,16 +55,26 @@ func (w Watcher) Run(ctx context.Context, emit func(WatchEvent) error) error {
 			return emit(WatchEvent{Type: WatchError, ObservedAt: time.Now().UTC(), Error: err.Error()})
 		}
 
+		event := WatchEvent{
+			ObservedAt:     time.Now().UTC(),
+			State:          advice.State,
+			Action:         advice.Action,
+			Message:        advice.Message,
+			LimitingWindow: advice.WorstWindow,
+		}
 		if lastState == nil {
+			event.Type = WatchInitial
 			state := advice.State
 			lastState = &state
-			return emit(WatchEvent{Type: WatchInitial, ObservedAt: time.Now().UTC(), Advice: &advice})
+			return emit(event)
 		}
 		if advice.State != *lastState {
+			event.Type = WatchStateChange
 			previous := *lastState
+			event.PreviousState = &previous
 			state := advice.State
 			lastState = &state
-			return emit(WatchEvent{Type: WatchStateChange, ObservedAt: time.Now().UTC(), PreviousState: &previous, Advice: &advice})
+			return emit(event)
 		}
 		return nil
 	}
