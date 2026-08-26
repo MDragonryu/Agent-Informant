@@ -15,10 +15,12 @@ type Messages struct {
 }
 
 type Usage struct {
-	DrainingRemaining float64  `json:"draining_remaining"`
-	CriticalRemaining float64  `json:"critical_remaining"`
-	Messages          Messages `json:"messages"`
-	WatchIntervalSec  int      `json:"watch_interval_seconds"`
+	DrainingRemaining   float64  `json:"draining_remaining"`
+	CriticalRemaining   float64  `json:"critical_remaining"`
+	RateDrainingMinutes float64  `json:"rate_draining_minutes"`
+	RateCriticalMinutes float64  `json:"rate_critical_minutes"`
+	Messages            Messages `json:"messages"`
+	WatchIntervalSec    int      `json:"watch_interval_seconds"`
 }
 
 type Config struct {
@@ -27,9 +29,11 @@ type Config struct {
 
 func Default() Config {
 	return Config{Usage: Usage{
-		DrainingRemaining: 25,
-		CriticalRemaining: 10,
-		WatchIntervalSec:  60,
+		DrainingRemaining:   25,
+		CriticalRemaining:   10,
+		RateDrainingMinutes: 30,
+		RateCriticalMinutes: 10,
+		WatchIntervalSec:    60,
 		Messages: Messages{
 			Green:    "Usage headroom is sufficient for normal operation.",
 			Draining: "Finish the current coherent unit of work, avoid substantial new work or delegation, then checkpoint before continuing later.",
@@ -75,6 +79,9 @@ func Load(path string) (Config, string, error) {
 func Validate(cfg Config) error {
 	if cfg.Usage.CriticalRemaining < 0 || cfg.Usage.DrainingRemaining < 0 || cfg.Usage.CriticalRemaining > cfg.Usage.DrainingRemaining || cfg.Usage.DrainingRemaining > 100 {
 		return fmt.Errorf("require 0 <= usage.critical_remaining <= usage.draining_remaining <= 100")
+	}
+	if cfg.Usage.RateCriticalMinutes < 0 || cfg.Usage.RateDrainingMinutes < 0 || cfg.Usage.RateCriticalMinutes > cfg.Usage.RateDrainingMinutes {
+		return fmt.Errorf("require 0 <= usage.rate_critical_minutes <= usage.rate_draining_minutes")
 	}
 	if cfg.Usage.WatchIntervalSec < 1 {
 		return fmt.Errorf("usage.watch_interval_seconds must be at least 1")
