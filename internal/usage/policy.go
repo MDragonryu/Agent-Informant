@@ -5,10 +5,25 @@ import "fmt"
 type Policy struct {
 	DrainingRemaining float64
 	CriticalRemaining float64
+	Messages          Messages
+}
+
+type Messages struct {
+	Green    string
+	Draining string
+	Critical string
+}
+
+func DefaultMessages() Messages {
+	return Messages{
+		Green:    "Usage headroom is sufficient for normal operation.",
+		Draining: "Finish the current coherent unit of work, avoid substantial new work or delegation, then checkpoint before continuing later.",
+		Critical: "Stop implementation at the nearest safe point. Make the current state coherent, record a handoff/checkpoint, and do not start new work.",
+	}
 }
 
 func DefaultPolicy() Policy {
-	return Policy{DrainingRemaining: 25, CriticalRemaining: 10}
+	return Policy{DrainingRemaining: 25, CriticalRemaining: 10, Messages: DefaultMessages()}
 }
 
 func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
@@ -17,6 +32,17 @@ func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
 	}
 	if p.CriticalRemaining < 0 || p.DrainingRemaining < 0 || p.CriticalRemaining > p.DrainingRemaining || p.DrainingRemaining > 100 {
 		return Advice{}, fmt.Errorf("invalid thresholds: require 0 <= critical <= draining <= 100")
+	}
+	messages := p.Messages
+	defaults := DefaultMessages()
+	if messages.Green == "" {
+		messages.Green = defaults.Green
+	}
+	if messages.Draining == "" {
+		messages.Draining = defaults.Draining
+	}
+	if messages.Critical == "" {
+		messages.Critical = defaults.Critical
 	}
 
 	worst := snapshot.Windows[0]
@@ -31,15 +57,15 @@ func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
 	case worst.PercentRemaining <= p.CriticalRemaining:
 		advice.State = StateCritical
 		advice.Action = "checkpoint-and-stop"
-		advice.Message = "Stop implementation at the nearest safe point. Make the current state coherent, record a handoff/checkpoint, and do not start new work."
+		advice.Message = messages.Critical
 	case worst.PercentRemaining <= p.DrainingRemaining:
 		advice.State = StateDraining
 		advice.Action = "finish-current-work"
-		advice.Message = "Finish the current coherent unit of work, avoid substantial new work or delegation, then checkpoint before continuing later."
+		advice.Message = messages.Draining
 	default:
 		advice.State = StateGreen
 		advice.Action = "continue"
-		advice.Message = "Usage headroom is sufficient for normal operation."
+		advice.Message = messages.Green
 	}
 	return advice, nil
 }
