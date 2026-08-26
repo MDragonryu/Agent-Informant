@@ -13,6 +13,7 @@ import (
 
 type CodexBarCollector struct {
 	Executable string
+	History    *HistoryStore
 }
 
 func NewCodexBarCollector() *CodexBarCollector {
@@ -20,7 +21,8 @@ func NewCodexBarCollector() *CodexBarCollector {
 	if exe == "" {
 		exe = "codexbar"
 	}
-	return &CodexBarCollector{Executable: exe}
+	store, _ := NewHistoryStore()
+	return &CodexBarCollector{Executable: exe, History: store}
 }
 
 func (c *CodexBarCollector) Name() string { return "codexbar" }
@@ -35,7 +37,17 @@ func (c *CodexBarCollector) Collect(ctx context.Context, provider string) (Snaps
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("run %s: %w", c.Executable, err)
 	}
-	return ParseCodexBarJSON(out, provider)
+	snapshot, err := ParseCodexBarJSON(out, provider)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if c.History != nil {
+		_ = c.History.Append(snapshot)
+		if history, loadErr := c.History.Load(snapshot.CollectedAt); loadErr == nil {
+			snapshot.History = history
+		}
+	}
+	return snapshot, nil
 }
 
 func ParseCodexBarJSON(data []byte, providerFilter string) (Snapshot, error) {
