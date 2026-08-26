@@ -1,11 +1,16 @@
 package usage
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Policy struct {
-	DrainingRemaining float64
-	CriticalRemaining float64
-	Messages          Messages
+	DrainingRemaining   float64
+	CriticalRemaining   float64
+	RateDrainingMinutes float64
+	RateCriticalMinutes float64
+	Messages            Messages
 }
 
 type Messages struct {
@@ -23,16 +28,30 @@ func DefaultMessages() Messages {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{DrainingRemaining: 25, CriticalRemaining: 10, Messages: DefaultMessages()}
+	return Policy{
+		DrainingRemaining:   25,
+		CriticalRemaining:   10,
+		RateDrainingMinutes: 30,
+		RateCriticalMinutes: 10,
+		Messages:            DefaultMessages(),
+	}
 }
 
 func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
+	return p.EvaluateWithHistory(snapshot, nil, time.Now().UTC())
+}
+
+func (p Policy) EvaluateWithHistory(snapshot Snapshot, history []Snapshot, now time.Time) (Advice, error) {
 	if len(snapshot.Windows) == 0 {
 		return Advice{}, fmt.Errorf("no usable usage windows found")
 	}
 	if p.CriticalRemaining < 0 || p.DrainingRemaining < 0 || p.CriticalRemaining > p.DrainingRemaining || p.DrainingRemaining > 100 {
 		return Advice{}, fmt.Errorf("invalid thresholds: require 0 <= critical <= draining <= 100")
 	}
+	if p.RateCriticalMinutes < 0 || p.RateDrainingMinutes < 0 || p.RateCriticalMinutes > p.RateDrainingMinutes {
+		return Advice{}, fmt.Errorf("invalid rate thresholds: require 0 <= rate critical <= rate draining")
+	}
+
 	messages := p.Messages
 	defaults := DefaultMessages()
 	if messages.Green == "" {
@@ -53,19 +72,41 @@ func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
 	}
 
 	advice := Advice{Snapshot: snapshot, WorstWindow: &worst}
+	state := StateGreen
 	switch {
 	case worst.PercentRemaining <= p.CriticalRemaining:
-		advice.State = StateCritical
+		state = StateCritical
+	case worst.PercentRemaining <= p.DrainingRemaining:
+		state = StateDraining
+	}
+
+	if len(history) > 0 {
+		advice.DrainRate = AnalyzeDrainRate(history, worst, p.CriticalRemaining, now)
+		if advice.DrainRate != nil && advice.DrainRate.EstimatedMinutesToExhaust != nil {
+			eta := *advice.DrainRate.EstimatedMinutesToExhaust
+			switch {
+			case p.RateCriticalMinutes > 0 && eta <= p.RateCriticalMinutes:
+				state = StateCritical
+			case p.RateDrainingMinutes > 0 && eta <= p.RateDrainingMinutes && state == StateGreen:
+				state = StateDraining
+			}
+		}
+	}
+
+	advice.State = state
+	switch state {
+	case StateCritical:
 		advice.Action = "checkpoint-and-stop"
 		advice.Message = messages.Critical
-	case worst.PercentRemaining <= p.DrainingRemaining:
-		advice.State = StateDraining
+	case StateDraining:
 		advice.Action = "finish-current-work"
 		advice.Message = messages.Draining
 	default:
-		advice.State = StateGreen
 		advice.Action = "continue"
 		advice.Message = messages.Green
+	}
+	if advice.DrainRate != nil {
+		advice.Message += " " + advice.DrainRate.Summary()
 	}
 	return advice, nil
 }
