@@ -12,9 +12,10 @@ type Window struct {
 }
 
 type Snapshot struct {
-	CollectedAt time.Time  `json:"collected_at"`
-	Windows     []Window   `json:"windows"`
-	History     []Snapshot `json:"-"`
+	CollectedAt time.Time   `json:"collected_at"`
+	Windows     []Window    `json:"windows"`
+	DrainRates  []DrainRate `json:"drain_rates,omitempty"`
+	History     []Snapshot  `json:"-"`
 }
 
 type State string
