@@ -1,6 +1,6 @@
 # Architecture
 
-Agent Informant is organized around domains, collectors, normalized models, policies, and sparse events.
+Agent Informant is organized around domains, collectors, normalized models, policies, sparse events, and delivery transports.
 
 ## Command model
 
@@ -26,9 +26,15 @@ normalized UsageSnapshot
       +----> policy evaluator ----> advice renderer / exit code
                      |
                      +------------> watch state engine ----> sparse events
+                                                          |
+                                                          +----> stdout/jsonl
+                                                          |
+                                                          +----> delivery transport
 ```
 
 The CLI must never expose an upstream collector's raw schema as its contract. Upstream formats can change; Agent Informant's normalized structures are the compatibility boundary.
+
+Likewise, delivery is downstream of the domain event model. A notification mechanism does not get to redefine usage states or collector behavior.
 
 ## Initial collector
 
@@ -115,6 +121,24 @@ Watch JSONL events are also intentionally smaller than `usage advise` output. Th
 
 Individual collector calls are bounded by a timeout so a hung upstream collector does not freeze the watcher indefinitely.
 
+## Delivery model
+
+Delivery transports consume emitted domain events after policy evaluation. The first transport executes a local program through `usage watch --exec`.
+
+The executable transport:
+
+- receives canonical compact JSON on stdin;
+- receives convenience `AGENT_INFORMANT_*` environment variables;
+- has a bounded execution timeout;
+- redirects child stdout away from Agent Informant's machine-readable stdout stream;
+- treats delivery failure as non-fatal so monitoring continues.
+
+The hook is invoked for the initial event as well as transitions and collection errors. This makes startup in an already-critical state immediately observable downstream.
+
+The implementation lives in a generic delivery package rather than the usage package. Future domains can therefore reuse the same transport without depending on usage-specific types.
+
+Additional transports should consume the same compact event contract rather than bypassing the watch state engine.
+
 ## Exit codes
 
 `usage status`:
@@ -140,6 +164,8 @@ Possible additions:
 - Named policy profiles for agents with different risk tolerances.
 - Collector discovery and health diagnostics.
 - A dedicated one-line/token-minimal probe format for extremely frequent agent checks.
-- Optional process/hook execution on state transitions.
-- MCP or local HTTP transport layered on top of the same domain services.
+- Persistent delivery configuration instead of CLI-only hooks.
+- Local HTTP/webhook delivery.
+- MCP transport layered on top of the same event model.
+- Named pipes / Unix domain sockets for low-overhead local integrations.
 - A general event model so future domains can expose agent-facing operational signals without changing the CLI architecture.
