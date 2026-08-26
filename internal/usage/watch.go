@@ -26,6 +26,7 @@ type Watcher struct {
 	Policy    Policy
 	Provider  string
 	Interval  time.Duration
+	Timeout   time.Duration
 }
 
 func (w Watcher) Run(ctx context.Context, emit func(WatchEvent) error) error {
@@ -33,10 +34,16 @@ func (w Watcher) Run(ctx context.Context, emit func(WatchEvent) error) error {
 	if interval <= 0 {
 		interval = time.Minute
 	}
+	timeout := w.Timeout
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
 
 	var lastState *State
 	collect := func() error {
-		snapshot, err := w.Collector.Collect(ctx, w.Provider)
+		collectCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		snapshot, err := w.Collector.Collect(collectCtx, w.Provider)
 		if err != nil {
 			return emit(WatchEvent{Type: WatchError, ObservedAt: time.Now().UTC(), Error: err.Error()})
 		}
