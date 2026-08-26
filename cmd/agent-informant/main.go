@@ -7,15 +7,25 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	appconfig "github.com/MDragonryu/Agent-Informant/internal/config"
+	"github.com/MDragonryu/Agent-Informant/internal/delivery"
 	"github.com/MDragonryu/Agent-Informant/internal/usage"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
+
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+func (s *stringList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
 
 func run(args []string) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -138,8 +148,16 @@ func runUsageWatch(args []string) int {
 	greenMsg := fs.String("message-green", "", "override green-state message")
 	drainingMsg := fs.String("message-draining", "", "override draining-state message")
 	criticalMsg := fs.String("message-critical", "", "override critical-state message")
+	execPath := fs.String("exec", "", "deliver each emitted watch event to this executable")
+	var execArgs stringList
+	fs.Var(&execArgs, "exec-arg", "argument passed to --exec; repeat for multiple arguments")
+	execTimeout := fs.Int("exec-timeout", 10, "delivery executable timeout in seconds")
+	noOutput := fs.Bool("no-output", false, "suppress normal watch stdout; useful with --exec")
 	if err := fs.Parse(args); err != nil { return 2 }
 	if *format != "text" && *format != "jsonl" { fmt.Fprintf(os.Stderr, "invalid --format %q: expected text or jsonl\n", *format); return 2 }
+	if *execTimeout < 1 { fmt.Fprintln(os.Stderr, "--exec-timeout must be at least 1 second"); return 2 }
+	if *noOutput && *execPath == "" { fmt.Fprintln(os.Stderr, "--no-output requires --exec"); return 2 }
+
 	policy, cfg, err := loadPolicy(*configPath, *draining, *critical, *greenMsg, *drainingMsg, *criticalMsg)
 	if err != nil { fmt.Fprintln(os.Stderr, err); return 1 }
 	poll := cfg.Usage.WatchIntervalSec
@@ -150,13 +168,63 @@ func runUsageWatch(args []string) int {
 	defer stop()
 	watcher := usage.Watcher{Collector: usage.NewCodexBarCollector(), Policy: policy, Provider: *provider, Interval: time.Duration(poll) * time.Second}
 	enc := json.NewEncoder(os.Stdout)
+	var hook *delivery.Exec
+	if *execPath != "" {
+		hook = &delivery.Exec{Path: *execPath, Args: execArgs, Timeout: time.Duration(*execTimeout) * time.Second}
+	}
+
 	err = watcher.Run(ctx, func(event usage.WatchEvent) error {
+		if hook != nil {
+			payload, marshalErr := json.Marshal(event)
+			if marshalErr != nil {
+				fmt.Fprintf(os.Stderr, "encode hook event: %v\n", marshalErr)
+			} else {
+				payload = append(payload, '\n')
+				if hookErr := hook.Send(ctx, payload, watchEventEnv(event)); hookErr != nil {
+					fmt.Fprintf(os.Stderr, "deliver watch event: %v\n", hookErr)
+				}
+			}
+		}
+
+		if *noOutput { return nil }
 		if *format == "jsonl" { return enc.Encode(event) }
 		printWatchEvent(event)
 		return nil
 	})
 	if err != nil { fmt.Fprintln(os.Stderr, err); return 1 }
 	return 0
+}
+
+func watchEventEnv(event usage.WatchEvent) map[string]string {
+	env := map[string]string{
+		"AGENT_INFORMANT_EVENT":       string(event.Type),
+		"AGENT_INFORMANT_OBSERVED_AT": event.ObservedAt.Format(time.RFC3339Nano),
+	}
+	if event.PreviousState != nil {
+		env["AGENT_INFORMANT_PREVIOUS_STATE"] = string(*event.PreviousState)
+	}
+	if event.Error != "" {
+		env["AGENT_INFORMANT_ERROR"] = event.Error
+	}
+	if event.Advice == nil {
+		return env
+	}
+
+	a := event.Advice
+	env["AGENT_INFORMANT_STATE"] = string(a.State)
+	env["AGENT_INFORMANT_ACTION"] = a.Action
+	env["AGENT_INFORMANT_MESSAGE"] = a.Message
+	if a.WorstWindow != nil {
+		w := a.WorstWindow
+		env["AGENT_INFORMANT_PROVIDER"] = w.Provider
+		env["AGENT_INFORMANT_WINDOW"] = w.Name
+		env["AGENT_INFORMANT_PERCENT_REMAINING"] = strconv.FormatFloat(w.PercentRemaining, 'f', -1, 64)
+		env["AGENT_INFORMANT_PERCENT_USED"] = strconv.FormatFloat(w.PercentUsed, 'f', -1, 64)
+		if w.ResetAt != nil {
+			env["AGENT_INFORMANT_RESET_AT"] = w.ResetAt.Format(time.RFC3339Nano)
+		}
+	}
+	return env
 }
 
 func printWatchEvent(event usage.WatchEvent) {
@@ -237,6 +305,8 @@ Advice and watch use thresholds/messages from the config file. Flags such as --d
 --critical, --message-green, --message-draining, and --message-critical override them.
 
 Watch emits one initial event and then only state changes or collection errors.
+Use --exec PATH to deliver each emitted event to an executable as JSON on stdin.
+Repeat --exec-arg VALUE for arguments. --no-output makes watch hook-only.
 
 Exit codes for advise:
   0   green
