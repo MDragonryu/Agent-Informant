@@ -31,6 +31,7 @@ agent-informant usage watch
 agent-informant usage watch --provider codex
 agent-informant usage watch --format jsonl
 agent-informant usage watch --interval 30
+agent-informant usage watch --exec /path/to/agent-hook --no-output
 
 agent-informant config path
 agent-informant config init
@@ -52,6 +53,22 @@ Example transition:
 ```text
 state_changed:green->draining draining 19.4% codex/weekly finish-current-work | Finish the current coherent unit of work, avoid substantial new work or delegation, then checkpoint before continuing later.
 ```
+
+`usage watch --exec PATH` actively delivers each emitted event to another local program. The hook receives compact JSON on stdin and `AGENT_INFORMANT_*` environment variables. Use `--no-output` when the executable is the only consumer.
+
+For example:
+
+```powershell
+agent-informant usage watch `
+  --provider codex `
+  --exec pwsh `
+  --exec-arg -NoProfile `
+  --exec-arg -File `
+  --exec-arg C:\Tools\agent-hook.ps1 `
+  --no-output
+```
+
+Hook failures are reported but do not stop monitoring. See [`docs/delivery.md`](docs/delivery.md) for the delivery contract and integration examples.
 
 The initial collector is CodexBar. Agent Informant invokes `codexbar usage --format json`, so it inherits CodexBar's provider support without coupling the rest of the application to CodexBar's schema.
 
@@ -102,6 +119,7 @@ This allows an orchestrator to provide task-specific instructions without modify
 - Agent-first CLI output.
 - Stable normalized schema independent of upstream collectors.
 - Sparse watch output to minimize agent-context/token cost.
+- Active event delivery without coupling to one agent framework.
 - Small dependency footprint.
 - Cross-platform operation.
 - Collector interfaces so future sources can be added without changing commands.
