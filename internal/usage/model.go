@@ -25,9 +25,10 @@ const (
 )
 
 type Advice struct {
-	State       State    `json:"state"`
-	Action      string   `json:"action"`
-	Message     string   `json:"message"`
-	WorstWindow *Window  `json:"worst_window,omitempty"`
-	Snapshot    Snapshot `json:"snapshot"`
+	State       State      `json:"state"`
+	Action      string     `json:"action"`
+	Message     string     `json:"message"`
+	WorstWindow *Window    `json:"worst_window,omitempty"`
+	DrainRate   *DrainRate `json:"drain_rate,omitempty"`
+	Snapshot    Snapshot   `json:"snapshot"`
 }
