@@ -43,6 +43,18 @@ func TestPolicyCritical(t *testing.T) {
 	}
 }
 
+func TestPolicyUsesConfiguredMessage(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.Messages.Draining = "wrap up and write the handoff now"
+	advice, err := policy.Evaluate(Snapshot{Windows: []Window{{Provider: "codex", Name: "session", PercentRemaining: 20}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advice.Message != "wrap up and write the handoff now" {
+		t.Fatalf("expected configured message, got %q", advice.Message)
+	}
+}
+
 func TestPolicyRejectsInvalidThresholds(t *testing.T) {
 	_, err := (Policy{DrainingRemaining: 5, CriticalRemaining: 10}).Evaluate(Snapshot{Windows: []Window{{PercentRemaining: 50}}})
 	if err == nil {
