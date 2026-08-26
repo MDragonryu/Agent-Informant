@@ -38,7 +38,7 @@ func DefaultPolicy() Policy {
 }
 
 func (p Policy) Evaluate(snapshot Snapshot) (Advice, error) {
-	return p.EvaluateWithHistory(snapshot, nil, time.Now().UTC())
+	return p.EvaluateWithHistory(snapshot, snapshot.History, time.Now().UTC())
 }
 
 func (p Policy) EvaluateWithHistory(snapshot Snapshot, history []Snapshot, now time.Time) (Advice, error) {
@@ -48,27 +48,23 @@ func (p Policy) EvaluateWithHistory(snapshot Snapshot, history []Snapshot, now t
 	if p.CriticalRemaining < 0 || p.DrainingRemaining < 0 || p.CriticalRemaining > p.DrainingRemaining || p.DrainingRemaining > 100 {
 		return Advice{}, fmt.Errorf("invalid thresholds: require 0 <= critical <= draining <= 100")
 	}
+	if p.RateDrainingMinutes == 0 && p.RateCriticalMinutes == 0 {
+		p.RateDrainingMinutes = 30
+		p.RateCriticalMinutes = 10
+	}
 	if p.RateCriticalMinutes < 0 || p.RateDrainingMinutes < 0 || p.RateCriticalMinutes > p.RateDrainingMinutes {
 		return Advice{}, fmt.Errorf("invalid rate thresholds: require 0 <= rate critical <= rate draining")
 	}
 
 	messages := p.Messages
 	defaults := DefaultMessages()
-	if messages.Green == "" {
-		messages.Green = defaults.Green
-	}
-	if messages.Draining == "" {
-		messages.Draining = defaults.Draining
-	}
-	if messages.Critical == "" {
-		messages.Critical = defaults.Critical
-	}
+	if messages.Green == "" { messages.Green = defaults.Green }
+	if messages.Draining == "" { messages.Draining = defaults.Draining }
+	if messages.Critical == "" { messages.Critical = defaults.Critical }
 
 	worst := snapshot.Windows[0]
 	for _, w := range snapshot.Windows[1:] {
-		if w.PercentRemaining < worst.PercentRemaining {
-			worst = w
-		}
+		if w.PercentRemaining < worst.PercentRemaining { worst = w }
 	}
 
 	advice := Advice{Snapshot: snapshot, WorstWindow: &worst}
@@ -105,19 +101,14 @@ func (p Policy) EvaluateWithHistory(snapshot Snapshot, history []Snapshot, now t
 		advice.Action = "continue"
 		advice.Message = messages.Green
 	}
-	if advice.DrainRate != nil {
-		advice.Message += " " + advice.DrainRate.Summary()
-	}
+	if advice.DrainRate != nil { advice.Message += " " + advice.DrainRate.Summary() }
 	return advice, nil
 }
 
 func ExitCode(state State) int {
 	switch state {
-	case StateDraining:
-		return 10
-	case StateCritical:
-		return 20
-	default:
-		return 0
+	case StateDraining: return 10
+	case StateCritical: return 20
+	default: return 0
 	}
 }
