@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,7 +85,7 @@ func (s *HistoryStore) Load(now time.Time) ([]Snapshot, error) {
 	for scanner.Scan() {
 		var snapshot Snapshot
 		if err := json.Unmarshal(scanner.Bytes(), &snapshot); err != nil {
-			continue // tolerate a partially-written/corrupt line
+			continue
 		}
 		if snapshot.CollectedAt.Before(cutoff) {
 			continue
