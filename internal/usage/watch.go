@@ -22,6 +22,7 @@ type WatchEvent struct {
 	Message        string         `json:"message,omitempty"`
 	LimitingWindow *Window        `json:"limiting_window,omitempty"`
 	Error          string         `json:"error,omitempty"`
+	Advice         *Advice        `json:"-"`
 }
 
 type Watcher struct {
@@ -61,6 +62,7 @@ func (w Watcher) Run(ctx context.Context, emit func(WatchEvent) error) error {
 			Action:         advice.Action,
 			Message:        advice.Message,
 			LimitingWindow: advice.WorstWindow,
+			Advice:         &advice,
 		}
 		if lastState == nil {
 			event.Type = WatchInitial
